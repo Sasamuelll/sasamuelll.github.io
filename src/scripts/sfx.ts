@@ -1,8 +1,8 @@
 /* ============================================================
-   Звук терминала на Web Audio.
-   Сигнал берётся из сэмпла (SFX_SAMPLES в consts.ts), а если файл
-   не задан или не загрузился — синтезируется из осцилляторов и шума.
-   Так шаблон работает и вовсе без аудиофайлов.
+   Terminal sound on Web Audio.
+   Each signal plays a sample from SFX_SAMPLES, falling back to a
+   synthesized version when no file is configured or the fetch fails —
+   so the template also works with no audio files at all.
    ============================================================ */
 
 import { SFX_SAMPLES } from '../consts';
@@ -11,22 +11,24 @@ const STORE_KEY = 'sound';
 
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
-// значение читается сразу: модуль может понадобиться раньше, чем скрипт шапки
+// Read at module load: sfx may be needed before the header script runs.
 let enabled = readEnabled();
 
 function readEnabled() {
   try {
-    return localStorage.getItem(STORE_KEY) !== '0';
+    const stored = localStorage.getItem(STORE_KEY);
+    if (stored !== null) return stored === '1';
   } catch {
-    return true; // приватный режим браузера — просто оставляем звук включённым
+    // Private browsing — treat as "no choice made yet".
   }
+  // Default off on phones: there is no hovering there, which is most of what
+  // the sound exists for, and an unexpected beep from a pocket is annoying.
+  return !window.matchMedia?.('(max-width: 640px)').matches;
 }
 
-/** декодированные сэмплы из SFX_SAMPLES; пусто — значит играет синтез */
 const samples = new Map<string, AudioBuffer>();
 let samplesLoading = false;
 
-/** подгружаем пользовательские файлы один раз, при первом создании контекста */
 function loadSamples(ac: AudioContext) {
   if (samplesLoading) return;
   samplesLoading = true;
@@ -36,12 +38,12 @@ function loadSamples(ac: AudioContext) {
       .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.status + ' ' + url))))
       .then((data) => ac.decodeAudioData(data))
       .then((buf) => samples.set(name, buf))
-      // файла нет или он битый — не беда, для этого сигнала останется синтез
+      // Missing or broken file is not fatal — the signal stays synthesized.
       .catch((e) => console.warn('[sfx] sample skipped:', e.message));
   }
 }
 
-/** проигрывает сэмпл, если он загружен; иначе отдаёт false и звучит синтез */
+/** Plays the sample if loaded; returns false so the caller can synthesize. */
 function sample(name: string, gain = 1) {
   const buf = samples.get(name);
   const ac = audio();
@@ -55,7 +57,7 @@ function sample(name: string, gain = 1) {
   return true;
 }
 
-/** AudioContext создаётся лениво: до первого жеста браузер его всё равно заглушит */
+/** Created lazily: browsers suspend an AudioContext until the first gesture. */
 function audio(): AudioContext | null {
   if (!enabled) return null;
   if (!ctx) {
@@ -63,7 +65,7 @@ function audio(): AudioContext | null {
     if (!AC) return null;
     ctx = new AC();
     master = ctx.createGain();
-    master.gain.value = 0.18; // общая громкость: сигналы должны быть фоном, а не ударом
+    master.gain.value = 0.18; // Signals should sit in the background, not hit.
     master.connect(ctx.destination);
     loadSamples(ctx);
   }
@@ -71,16 +73,16 @@ function audio(): AudioContext | null {
   return ctx;
 }
 
-/** одиночный тон с экспоненциальным спадом */
 function tone(opts: {
   freq: number;
-  /** конечная частота для «съезда» тона; по умолчанию без глиссандо */
+  /** Ramp target for a pitch slide; omit for a steady tone. */
   freqTo?: number;
   dur: number;
   type?: OscillatorType;
   gain?: number;
   delay?: number;
-  /** частота среза ФНЧ: глушит верхние гармоники — звук «из корпуса», а не из наушников */
+  /** Lowpass cutoff. Muting the upper harmonics is what makes a tone read as
+      a speaker inside a case rather than a clean UI chime. */
   lowpass?: number;
 }) {
   const ac = audio();
@@ -95,7 +97,7 @@ function tone(opts: {
   if (opts.freqTo) osc.frequency.exponentialRampToValueAtTime(opts.freqTo, t0 + opts.dur);
 
   const peak = opts.gain ?? 0.6;
-  // короткая атака вместо щелчка на старте, дальше экспоненциальный хвост
+  // Short attack instead of an instant start, which would click.
   amp.gain.setValueAtTime(0.0001, t0);
   amp.gain.exponentialRampToValueAtTime(peak, t0 + 0.004);
   amp.gain.exponentialRampToValueAtTime(0.0001, t0 + opts.dur);
@@ -114,7 +116,7 @@ function tone(opts: {
   osc.stop(t0 + opts.dur + 0.02);
 }
 
-/** щелчок реле: очень короткий всплеск отфильтрованного шума */
+/** Relay click: a very short burst of filtered noise. */
 function noise(dur = 0.03, gain = 0.35, freq = 1800) {
   const ac = audio();
   if (!ac || !master) return;
@@ -123,7 +125,7 @@ function noise(dur = 0.03, gain = 0.35, freq = 1800) {
   const buf = ac.createBuffer(1, frames, ac.sampleRate);
   const data = buf.getChannelData(0);
   for (let i = 0; i < frames; i++) {
-    // затухание к концу буфера, чтобы не было обрыва
+    // Fade towards the end of the buffer so it does not cut off abruptly.
     data[i] = (Math.random() * 2 - 1) * (1 - i / frames);
   }
 
@@ -145,9 +147,8 @@ function noise(dur = 0.03, gain = 0.35, freq = 1800) {
 let lastHover = 0;
 
 export const sfx = {
-  /** наведение на кликабельное слово/строку — короткий сухой блип */
   hover() {
-    // при быстром проходе мышью по сетке символов блипы не должны сливаться в очередь
+    // Sweeping a mouse across the character grid must not queue up blips.
     const now = performance.now();
     if (now - lastHover < 45) return;
     lastHover = now;
@@ -155,21 +156,18 @@ export const sfx = {
     tone({ freq: 240, dur: 0.035, type: 'square', gain: 0.5, lowpass: 900 });
   },
 
-  /** подтверждение выбора — двойной тон вверх */
   select() {
     if (sample('select', 0.6)) return;
     tone({ freq: 240, dur: 0.04, gain: 0.5, lowpass: 900 });
     tone({ freq: 330, dur: 0.07, gain: 0.45, delay: 0.04, lowpass: 1000 });
   },
 
-  /** отказ — низкое дребезжание */
   deny() {
     if (sample('deny', 0.6)) return;
     tone({ freq: 190, freqTo: 120, dur: 0.22, type: 'sawtooth', gain: 0.4 });
     tone({ freq: 96, dur: 0.24, type: 'square', gain: 0.25, delay: 0.02 });
   },
 
-  /** доступ разрешён — восходящее арпеджио */
   grant() {
     if (sample('grant', 0.7)) return;
     [260, 330, 390].forEach((f, i) =>
@@ -177,14 +175,13 @@ export const sfx = {
     );
   },
 
-  /** печать символа */
   key() {
     if (sample('key', 0.4)) return;
     tone({ freq: 700 + Math.random() * 200, dur: 0.02, gain: 0.2, lowpass: 1600 });
     noise(0.008, 0.08, 1400);
   },
 
-  /** включение экрана */
+  /** CRT hum — used when the theme switches and the screen "relights". */
   power() {
     if (sample('power')) return;
     tone({ freq: 60, freqTo: 220, dur: 0.5, type: 'sawtooth', gain: 0.22 });
@@ -205,19 +202,18 @@ export const sfx = {
 };
 
 /**
- * Навешивает звук на элементы по селектору внутри root.
- * Работает и с мышью, и с клавиатурой (focus), и переживает
- * перерисовку DOM — слушатели вешаются через делегирование.
+ * Attaches sound to elements matching `selector` inside `root`.
+ * Listeners are delegated, so they survive the DOM being re-rendered.
  */
 export function bindSfx(root: ParentNode | Document = document, selector = '[data-sfx]') {
   const target = (e: Event) =>
     (e.target as HTMLElement | null)?.closest<HTMLElement>(selector) ?? null;
 
-  // pointerover, а не mouseover: не звенит при скролле на тач-устройствах
+  // pointerover rather than mouseover: no blips while scrolling on touch.
   root.addEventListener('pointerover', (e) => {
     if ((e as PointerEvent).pointerType !== 'mouse') return;
     const el = target(e);
-    // всплывающий pointerover внутри одного элемента не должен повторять блип
+    // Bubbling within one element must not repeat the blip.
     if (el && !el.contains((e as PointerEvent).relatedTarget as Node)) sfx.hover();
   });
 

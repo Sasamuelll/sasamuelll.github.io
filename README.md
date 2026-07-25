@@ -26,7 +26,9 @@ authentic IBM VGA 8×16 font (with Cyrillic support).
 - **Archive by year, tags, RSS, and an "about" page.**
 - **Terminal sound**: hovering menu rows, links and the minigame grid
   plays a short blip; selecting, failing and unlocking have their own
-  signals. Toggle with the `SND` button (the choice is remembered).
+  signals. Toggle with the `SND` button (the choice is remembered). On
+  phones sound starts **off** — there is no hovering there, which is most of
+  what it exists for — but an explicit choice always wins over that default.
   Signals are synthesized with the Web Audio API — low square tones run
   through a lowpass filter, so they sound like a speaker inside the case
   rather than a clean UI chime. The one exception is the "access denied"
@@ -36,8 +38,17 @@ authentic IBM VGA 8×16 font (with Cyrillic support).
   of your own: drop it in `public/sounds/` and add it to `SFX_SAMPLES` in
   `src/consts.ts` — remove the entry and the synth takes over again. Just
   use audio you have the rights to.
+- **Lightweight on phones**: below 640px the terminal drops what hurts on a
+  small screen — scanlines (they alias into moire on dense displays), the
+  vignette, the flicker animation, text glow, the boot screen and the outer
+  frame border. The `THEME` and `SND` buttons move from the header to the
+  footer, where they scroll away with the content instead of costing a
+  permanent nav line. The minigame swaps its character grid for a list of
+  tappable 48px rows, since the grid means ~344 targets of about 9x15px. Post rows,
+  nav links and buttons all get touch-sized hit areas, and wide tables scroll
+  inside themselves instead of dragging the page sideways.
 - **Keyboard shortcuts**: `H` — home, `A` — archive, `T` — theme
-  (they also work on a Russian keyboard layout).
+  (they also work on a Russian keyboard layout). Desktop only, naturally.
 
 ## Adding a post
 

@@ -1,21 +1,19 @@
 /* ============================================================
-   Hacking minigame — переиспользуемый модуль.
-   Используется на странице 404 и как гейт приватного режима.
+   Hacking minigame, shared by the 404 page and the private-mode gate.
    ============================================================ */
 
 import { SITE_VENDOR, SITE_SYSTEM } from '../consts';
 import { sfx, bindSfx } from './sfx';
 
 export interface HackOptions {
-  /** вызывается при угаданном пароле (после показа статуса) */
+  /** Called once the password is found, after the status line is shown. */
   onGranted?: (word: string) => void;
-  /** текст статуса при успехе */
   grantText?: string;
-  /** задержка перед onGranted, мс */
+  /** Delay before onGranted, in ms. */
   grantDelay?: number;
-  /** при провале всех попыток показать «RETRY» и пересобрать поле */
+  /** On running out of attempts, offer RETRY and rebuild the board. */
   allowRetry?: boolean;
-  /** текст статуса при блокировке (когда allowRetry выключен) */
+  /** Status text when locked out (used when allowRetry is off). */
   lockText?: string;
 }
 
@@ -27,13 +25,19 @@ const WORDS_POOL = [
 ];
 const GARBAGE = '!@#$%^&*()_+-=[]{};:,.<>/?|\\~`"\'';
 const WORD_LEN = 7;
-const WORD_COUNT = 12; // больше слов = сложнее
-const COLS = 13; // символов в строке
-const ROWS = 16; // строк в колонке
+const WORD_COUNT = 12; // More words means a harder board.
+const COLS = 13;
+const ROWS = 16;
 const COLUMNS = 2;
 const ATTEMPTS = 4;
 
 type Cell = null | { ch: string; word: string; head: boolean };
+
+const COMPACT_QUERY = '(max-width: 640px)';
+
+function isCompact() {
+  return window.matchMedia?.(COMPACT_QUERY).matches ?? false;
+}
 
 export function buildHackGame(root: HTMLElement, opts: HackOptions = {}) {
   const grantText = opts.grantText ?? 'ACCESS GRANTED';
@@ -45,14 +49,17 @@ export function buildHackGame(root: HTMLElement, opts: HackOptions = {}) {
   function render() {
     let attempts = ATTEMPTS;
     let solved = false;
+    const compact = isCompact();
+    let attEl: HTMLElement;
+    let status: HTMLElement;
 
-    // --- выбрать слова и пароль (все длиной WORD_LEN) ---
+    // Pick the words and the password (all exactly WORD_LEN long).
     const words = shuffle([...WORDS_POOL])
       .filter((w) => w.length === WORD_LEN)
       .slice(0, WORD_COUNT);
     const password = words[Math.floor(Math.random() * words.length)];
 
-    // --- разложить слова по сетке; можно несколько на строку, с зазором ---
+    // Scatter the words across the grid, several per row where they fit.
     const totalRows = ROWS * COLUMNS;
     const grid: Cell[][] = [];
     for (let r = 0; r < totalRows; r++) grid.push(new Array(COLS).fill(null));
@@ -61,7 +68,7 @@ export function buildHackGame(root: HTMLElement, opts: HackOptions = {}) {
       for (let tries = 0; tries < 400; tries++) {
         const row = Math.floor(Math.random() * totalRows);
         const start = Math.floor(Math.random() * (COLS - WORD_LEN + 1));
-        // требуем пустоту в слове и по одному пустому символу с боков
+        // Require free cells for the word plus one blank on each side.
         let free = true;
         for (let c = start - 1; c <= start + WORD_LEN; c++) {
           if (c >= 0 && c < COLS && grid[row][c]) { free = false; break; }
@@ -73,14 +80,13 @@ export function buildHackGame(root: HTMLElement, opts: HackOptions = {}) {
         break;
       }
     }
-    // заполнить остальное «мусором»
+    // Fill everything else with garbage characters.
     for (let r = 0; r < totalRows; r++) {
       for (let c = 0; c < COLS; c++) {
         if (!grid[r][c]) grid[r][c] = { ch: rand(GARBAGE), word: '', head: false };
       }
     }
 
-    // --- рендер ---
     const baseAddr = 0xf000 + Math.floor(Math.random() * 0x0800);
     root.innerHTML = '';
 
@@ -91,6 +97,30 @@ export function buildHackGame(root: HTMLElement, opts: HackOptions = {}) {
       '<p class="hack__attempts" id="hack-att"></p>' +
       '<p class="hack__status" id="hack-status"></p>';
     root.appendChild(head);
+
+    // The character grid is unusable on a phone: ~344 targets of about
+    // 9x15px. Show the same words as a list of finger-sized rows instead.
+    if (compact) {
+      const list = el('div', 'hack__list');
+      for (const w of words) {
+        const row = el('button', 'hack__word hack__word--row');
+        row.setAttribute('type', 'button');
+        row.dataset.sfx = 'hover'; // guess() voices the click: grant/deny
+        row.dataset.word = w;
+        const addr = el('span', 'hack__addr');
+        addr.textContent =
+          '0x' + (baseAddr + words.indexOf(w) * COLS).toString(16).toUpperCase();
+        const label = el('span', 'hack__word-label');
+        label.textContent = w;
+        row.append(addr, label);
+        row.addEventListener('click', () => guess(w, row));
+        list.appendChild(row);
+      }
+      root.appendChild(list);
+      bindSfx(list);
+      finish(head);
+      return;
+    }
 
     const gridEl = el('div', 'hack__grid');
     for (let col = 0; col < COLUMNS; col++) {
@@ -110,13 +140,15 @@ export function buildHackGame(root: HTMLElement, opts: HackOptions = {}) {
       gridEl.appendChild(colEl);
     }
     root.appendChild(gridEl);
-    // делегируем на всю сетку: строки перерисовываются, слушатели остаются
     bindSfx(gridEl);
+    finish(head);
 
-    const attEl = head.querySelector<HTMLElement>('#hack-att')!;
-    const status = head.querySelector<HTMLElement>('#hack-status')!;
-    drawAttempts();
-    status.innerHTML = '&gt; AWAITING INPUT<span class="hack__cursor"></span>';
+    function finish(headEl: HTMLElement) {
+      attEl = headEl.querySelector<HTMLElement>('#hack-att')!;
+      status = headEl.querySelector<HTMLElement>('#hack-status')!;
+      drawAttempts();
+      status.innerHTML = '&gt; AWAITING INPUT<span class="hack__cursor"></span>';
+    }
 
     function drawAttempts() {
       let s = 'ATTEMPTS LEFT: ';
@@ -133,14 +165,14 @@ export function buildHackGame(root: HTMLElement, opts: HackOptions = {}) {
         if (cell.word && cell.head) {
           const span = document.createElement('span');
           span.className = 'hack__word';
-          span.dataset.sfx = 'hover'; // клик озвучивает сама guess(): grant/deny
+          span.dataset.sfx = 'hover'; // guess() voices the click: grant/deny
           span.dataset.word = cell.word;
           span.textContent = cell.word;
           span.addEventListener('click', () => guess(cell.word, span));
           parent.appendChild(span);
           i += cell.word.length;
         } else {
-          // каждый «мусорный» символ — отдельно подсвечиваемая ячейка
+          // Every garbage character highlights on its own.
           const c = document.createElement('span');
           c.className = 'hack__char';
           c.dataset.sfx = 'hover';
@@ -163,7 +195,6 @@ export function buildHackGame(root: HTMLElement, opts: HackOptions = {}) {
         if (opts.onGranted) setTimeout(() => opts.onGranted!(word), grantDelay);
         return;
       }
-      // промах
       sfx.deny();
       span.classList.add('is-dud');
       attempts--;

@@ -1,6 +1,6 @@
 ---
-// Гейт приватного режима: полноэкранный оверлей с миниигрой.
-// Рендерится в Layout только когда PRIVATE_MODE === true.
+// Private-mode gate: a full-screen overlay holding the minigame.
+// Layout renders it only when PRIVATE_MODE is on.
 import { SITE_VENDOR, SITE_SYSTEM } from '../consts';
 ---
 
@@ -16,7 +16,7 @@ import { SITE_VENDOR, SITE_SYSTEM } from '../consts';
 </div>
 
 <script is:inline>
-  // если уже разблокировано в этой сессии — прячем гейт до отрисовки (без мигания)
+  // Already unlocked this session: hide before paint so it does not flash.
   (function () {
     if (sessionStorage.getItem('unlocked')) {
       var g = document.getElementById('hack-gate');
@@ -35,11 +35,11 @@ import { SITE_VENDOR, SITE_SYSTEM } from '../consts';
     if (sessionStorage.getItem('unlocked')) {
       gate.remove();
     } else {
-      // запрещаем прокрутку фона, пока гейт открыт
+      // Lock background scrolling while the gate is up.
       document.documentElement.style.overflow = 'hidden';
       buildHackGame(root, {
         grantText: 'ACCESS GRANTED, WELCOME…',
-        allowRetry: true, // провалил все попытки — можно пересобрать поле
+        allowRetry: true, // Running out of attempts must not be a dead end.
         onGranted: () => {
           sessionStorage.setItem('unlocked', '1');
           gate.classList.add('hack-gate--done');

@@ -1,5 +1,6 @@
 ---
 import { SITE_TITLE, SITE_TAGLINE, SITE_VERSION, SITE_BUILD_ID } from '../consts';
+import TerminalToggles from './TerminalToggles.astro';
 
 const buildDate = new Date()
   .toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
@@ -26,19 +27,7 @@ const current = (path: string) =>
       <a href="/blog/" aria-current={current('/blog/')}>&gt; ARCHIVE</a>
       <a href="/about/" aria-current={current('/about/')}>&gt; ABOUT</a>
       <a href="/rss.xml">&gt; RSS</a>
-      <!-- data-sfx="hover": у обеих кнопок свой звук по клику -->
-      <button class="nav-theme" data-action="theme" data-sfx="hover" type="button">
-        ◙ THEME
-      </button>
-      <button
-        class="nav-sound"
-        data-action="sound"
-        data-sfx="hover"
-        type="button"
-        aria-pressed="true"
-      >
-        <span data-sound-label>♪ SND</span>
-      </button>
+      <TerminalToggles class="toggles--header" />
     </nav>
   </div>
 </header>
